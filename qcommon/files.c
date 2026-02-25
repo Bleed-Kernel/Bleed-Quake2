@@ -363,18 +363,19 @@ void FS_Read (void *buffer, int len, FILE *f)
 		read = fread (buf, 1, block, f);
 		if (read == 0)
 		{
-			// we might have been trying to read from a CD
 			if (!tries)
-			{
-				tries = 1;
 				CDAudio_Stop();
-			}
-			else
-				Com_Error (ERR_FATAL, "FS_Read: 0 bytes read");
+			if (++tries < 8)
+				continue;
+			Com_DPrintf ("FS_Read: read 0 bytes, zeroing %d bytes\n", remaining);
+			memset(buf, 0, remaining);
+			return;
 		}
 
-		if (read == -1)
+		if (read < 0)
 			Com_Error (ERR_FATAL, "FS_Read: -1 bytes read");
+
+		tries = 0;
 
 		// do some progress bar thing here...
 
@@ -849,6 +850,8 @@ void FS_InitFilesystem (void)
 	// allows the game to run from outside the data tree
 	//
 	fs_basedir = Cvar_Get ("basedir", ".", CVAR_NOSET);
+	if (strcmp(fs_basedir->string, "/initrd"))
+		Cvar_ForceSet("basedir", "/initrd");
 
 	//
 	// cddir <path>
@@ -872,6 +875,3 @@ void FS_InitFilesystem (void)
 	if (fs_gamedirvar->string[0])
 		FS_SetGamedir (fs_gamedirvar->string);
 }
-
-
-

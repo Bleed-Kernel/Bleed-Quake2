@@ -6,3 +6,5 @@ baseq2*
 x64
 Debug
 Release
+bin/
+sysroot/

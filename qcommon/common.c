@@ -19,7 +19,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 // common.c -- misc functions used in client and server
 #include "qcommon.h"
-#include <setjmp.h>
 
 #define	MAXPRINTMSG	4096
 
@@ -31,7 +30,7 @@ char	*com_argv[MAX_NUM_ARGVS+1];
 
 int		realtime;
 
-jmp_buf abortframe;		// an ERR_DROP occured, exit the entire frame
+int abortframe;
 
 
 FILE	*log_stats_file;
@@ -194,7 +193,7 @@ void Com_Error (int code, char *fmt, ...)
 	{
 		CL_Drop ();
 		recursive = false;
-		longjmp (abortframe, -1);
+		return;
 	}
 	else if (code == ERR_DROP)
 	{
@@ -202,7 +201,7 @@ void Com_Error (int code, char *fmt, ...)
 		SV_Shutdown (va("Server crashed: %s\n", msg), false);
 		CL_Drop ();
 		recursive = false;
-		longjmp (abortframe, -1);
+		return;
 	}
 	else
 	{
@@ -1403,9 +1402,6 @@ void Qcommon_Init (int argc, char **argv)
 {
 	char	*s;
 
-	if (setjmp (abortframe) )
-		Sys_Error ("Error during initialization");
-
 	z_chain.next = z_chain.prev = &z_chain;
 
 	// prepare enough of the subsystems to handle
@@ -1496,9 +1492,6 @@ void Qcommon_Frame (int msec)
 {
 	char	*s;
 	int		time_before, time_between, time_after;
-
-	if (setjmp (abortframe) )
-		return;			// an ERR_DROP was thrown
 
 	if ( log_stats->modified )
 	{
