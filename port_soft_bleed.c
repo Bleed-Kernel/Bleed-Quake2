@@ -59,7 +59,6 @@ static uint64_t g_fb_pitch_bytes = 0;
 
 static int g_tty_fd = -1;
 static int g_mouse_fd = -1;
-static uint32_t g_tty_restore_flags = TTY_ECHO | TTY_CANNONICAL;
 
 static int g_width = 640;
 static int g_height = 480;
@@ -272,10 +271,6 @@ rserr_t SWimp_SetMode(int *pwidth, int *pheight, int mode, qboolean fullscreen) 
 }
 
 void SWimp_Shutdown(void) {
-    _ioctl(0, TTY_IOCTL_SET_FLAGS, &g_tty_restore_flags);
-    if (g_tty_fd >= 0)
-        _ioctl(g_tty_fd, TTY_IOCTL_SET_FLAGS, &g_tty_restore_flags);
-
     close_fd_if_open(&g_mouse_fd);
     close_fd_if_open(&g_tty_fd);
     close_fd_if_open(&g_fb_fd);
