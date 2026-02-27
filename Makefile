@@ -32,6 +32,7 @@ CFLAGS_COMMON := \
 	-pipe \
 	-Wall \
 	-Wextra \
+	-mavx2 \
 	-Wno-implicit-function-declaration \
 	-Wno-incompatible-pointer-types \
 	-Wno-int-conversion \
