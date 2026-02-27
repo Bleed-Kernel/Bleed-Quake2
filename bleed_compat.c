@@ -5,8 +5,14 @@
 #include <string.h>
 #include <stdint.h>
 #include <limits.h>
-#include <syscalls/femtoseconds.h>
+#include <devices/hpet.h>
+#include <fcntl.h>
+#include <syscalls/open.h>
+#include <syscalls/read.h>
+#include <syscalls/ioctl.h>
 #include "time.h"
+
+#define HPET_DEVICE_PATH "/dev/hpet"
 
 struct rtc_time_compat {
     unsigned char sec;
@@ -18,6 +24,25 @@ struct rtc_time_compat {
 };
 
 extern int _time(struct rtc_time_compat *buf);
+static int g_hpet_fd = -2;
+
+static uint64_t hpet_now_femtoseconds(void) {
+    uint64_t now = 0;
+
+    if (g_hpet_fd == -2)
+        g_hpet_fd = _open(HPET_DEVICE_PATH, O_RDONLY);
+
+    if (g_hpet_fd < 0)
+        return 0;
+
+    if (_ioctl(g_hpet_fd, HPET_IOCTL_GET_FEMTOSECONDS, &now) == 0)
+        return now;
+
+    if (_read(g_hpet_fd, &now, sizeof(now)) == (long)sizeof(now))
+        return now;
+
+    return 0;
+}
 
 static unsigned int g_rand_state = 1U;
 
@@ -307,7 +332,7 @@ double pow(double x, double y) {
 }
 
 time_t time(time_t *tloc) {
-    uint64_t fs = _femtoseconds();
+    uint64_t fs = hpet_now_femtoseconds();
     time_t sec = (time_t)(fs / femtosecondsPerSecond);
     if (tloc)
         *tloc = sec;

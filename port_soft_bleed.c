@@ -4,14 +4,15 @@
 #include <string.h>
 
 #include <devices/keyboard.h>
+#include <devices/hpet.h>
 #include <fcntl.h>
 #include <fs/file.h>
 #include <graphics/display.h>
 #include <sys/ioctl.h>
 #include <syscalls/close.h>
-#include <syscalls/femtoseconds.h>
 #include <syscalls/open.h>
 #include <syscalls/read.h>
+#include <syscalls/ioctl.h>
 
 #include "quake2.h"
 #include "client/keys.h"
@@ -41,6 +42,7 @@ typedef struct {
 #endif
 
 #define KEYQUEUE_SIZE 64
+#define HPET_DEVICE_PATH "/dev/hpet"
 
 #define TTY_ECHO         (1 << 1)
 #define TTY_CANNONICAL   (1 << 2)
@@ -72,6 +74,25 @@ static int g_mouse_captured = 0;
 static int g_mouse_dx = 0;
 static int g_mouse_dy = 0;
 static uint8_t g_old_mouse_buttons = 0;
+static int g_hpet_fd = -2;
+
+static uint64_t hpet_now_femtoseconds(void) {
+    uint64_t now = 0;
+
+    if (g_hpet_fd == -2)
+        g_hpet_fd = _open(HPET_DEVICE_PATH, O_RDONLY);
+
+    if (g_hpet_fd < 0)
+        return 0;
+
+    if (_ioctl(g_hpet_fd, HPET_IOCTL_GET_FEMTOSECONDS, &now) == 0)
+        return now;
+
+    if (_read(g_hpet_fd, &now, sizeof(now)) == (long)sizeof(now))
+        return now;
+
+    return 0;
+}
 
 static void close_fd_if_open(int *fd) {
     if (*fd >= 0)
@@ -476,9 +497,13 @@ static void handle_input(void) {
 
 int QG_Milliseconds(void) {
     static uint64_t start_fs = 0;
-    uint64_t now_fs = _femtoseconds();
+    static int fallback_ms = 0;
+    uint64_t now_fs = hpet_now_femtoseconds();
 
-    if (!start_fs)
+    if (!now_fs)
+        return ++fallback_ms;
+
+    if (!start_fs || now_fs < start_fs)
         start_fs = now_fs;
 
     return (int)((now_fs - start_fs) / femtosecondsPerMillisecond);
