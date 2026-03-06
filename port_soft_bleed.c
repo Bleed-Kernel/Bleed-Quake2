@@ -49,20 +49,12 @@ typedef struct {
 #define TTY_NONBLOCK     (1 << 4)
 #define TTY_FLAGS_QUAKE  (TTY_NONBLOCK)
 
-#ifndef FB_IOC_ACQUIRE
-#define FB_IOC_ACQUIRE  0x5003
-#endif
-#ifndef FB_IOC_RELEASE
-#define FB_IOC_RELEASE  0x5004
-#endif
-
 static color_t g_colors[256];
 static uint16_t g_palette_565[256];
 static uint32_t g_palette_xrgb8888[256];
 static uint8_t g_palette_bgr24[256][3];
 
 static int g_fb_fd = -1;
-static int g_fb_acquired = 0;
 static uint8_t *g_fb_backbuffer = NULL;
 static struct fb_info g_fb_info;
 static uint64_t g_fb_pitch_bytes = 0;
@@ -302,10 +294,6 @@ rserr_t SWimp_SetMode(int *pwidth, int *pheight, int mode, qboolean fullscreen) 
 void SWimp_Shutdown(void) {
     close_fd_if_open(&g_mouse_fd);
     close_fd_if_open(&g_tty_fd);
-    if (g_fb_fd >= 0 && g_fb_acquired) {
-        (void)_ioctl(g_fb_fd, FB_IOC_RELEASE, NULL);
-        g_fb_acquired = 0;
-    }
     close_fd_if_open(&g_fb_fd);
 
     if (g_screen_memory)
@@ -342,13 +330,6 @@ int SWimp_Init(void *hInstance, void *wndProc) {
         Sys_Error("failed to open /dev/fb0\n");
         goto fail;
     }
-
-    if (_ioctl(g_fb_fd, FB_IOC_ACQUIRE, NULL) < 0)
-    {
-        Sys_Error("framebuffer is busy (another GUI owner holds it)\n");
-        goto fail;
-    }
-    g_fb_acquired = 1;
 
     if (_ioctl(g_fb_fd, FB_IOC_GET_INFO, &g_fb_info) < 0)
     {
@@ -491,8 +472,8 @@ void SWimp_EndFrame(void) {
         }
     }
 
-    if (g_fb_fd >= 0 && g_fb_acquired)
-        (void)_ioctl(g_fb_fd, FB_IOC_FLIP, g_fb_backbuffer);
+    if (g_fb_fd >= 0)
+        _ioctl(g_fb_fd, FB_IOC_FLIP, g_fb_backbuffer);
 
     handle_keyboard_input();
     handle_mouse_input();
