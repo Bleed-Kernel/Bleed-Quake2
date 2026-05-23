@@ -19,20 +19,19 @@ BLIBC_AUTO_UPDATE ?= 0
 INCLUDES := -I$(SYSROOT_DIR)/include -I.
 
 CFLAGS_COMMON := \
-	-std=gnu17 \
+	-std=gnu11 \
 	-ffreestanding \
 	-fno-stack-protector \
 	-fno-stack-check \
 	-m64 \
 	-march=x86-64 \
 	-mtune=generic \
-	-msse2 \
 	-nostdlib \
 	-no-pie \
 	-pipe \
 	-Wall \
 	-Wextra \
-	-mavx2 \
+	-mno-avx \
 	-Wno-implicit-function-declaration \
 	-Wno-incompatible-pointer-types \
 	-Wno-int-conversion \
