@@ -202,30 +202,6 @@ static double dabs(double x) {
     return (x < 0.0) ? -x : x;
 }
 
-double floor(double x) {
-    long i = (long)x;
-    if ((double)i > x)
-        --i;
-    return (double)i;
-}
-
-double ceil(double x) {
-    long i = (long)x;
-    if ((double)i < x)
-        ++i;
-    return (double)i;
-}
-
-double fmod(double x, double y) {
-    double q;
-
-    if (y == 0.0)
-        return 0.0;
-
-    q = floor(x / y);
-    return x - q * y;
-}
-
 static double atan_approx(double x) {
     double ax = dabs(x);
     double r;
@@ -240,95 +216,6 @@ static double atan_approx(double x) {
     }
 
     return x < 0.0 ? -r : r;
-}
-
-double atan(double x) {
-    return atan_approx(x);
-}
-
-double atan2(double y, double x) {
-    if (x > 0.0)
-        return atan_approx(y / x);
-    if (x < 0.0 && y >= 0.0)
-        return atan_approx(y / x) + 3.1415926535897932;
-    if (x < 0.0 && y < 0.0)
-        return atan_approx(y / x) - 3.1415926535897932;
-    if (x == 0.0 && y > 0.0)
-        return 1.5707963267948966;
-    if (x == 0.0 && y < 0.0)
-        return -1.5707963267948966;
-    return 0.0;
-}
-
-double acos(double x) {
-    double negate;
-    double ret;
-
-    if (x > 1.0)
-        x = 1.0;
-    if (x < -1.0)
-        x = -1.0;
-
-    negate = (double)(x < 0.0);
-    x = dabs(x);
-
-    ret = -0.0187293;
-    ret = ret * x;
-    ret = ret + 0.0742610;
-    ret = ret * x;
-    ret = ret - 0.2121144;
-    ret = ret * x;
-    ret = ret + 1.5707288;
-    ret = ret * sqrt(1.0 - x);
-    ret = ret - 2.0 * negate * ret;
-
-    return negate * 3.1415926535897932 + ret;
-}
-
-double pow(double x, double y) {
-    int i;
-    int n;
-    double result;
-    double frac;
-    double root;
-
-    if (x <= 0.0)
-        return 0.0;
-    if (y == 0.0)
-        return 1.0;
-
-    n = (int)floor(y);
-    frac = y - (double)n;
-
-    result = 1.0;
-
-    if (n >= 0)
-    {
-        for (i = 0; i < n; ++i)
-            result *= x;
-    }
-    else
-    {
-        for (i = 0; i < -n; ++i)
-            result /= x;
-    }
-
-    if (frac > 0.0)
-    {
-        unsigned int bits = (unsigned int)(frac * 65536.0);
-        unsigned int mask = 1U << 15;
-        root = x;
-
-        for (i = 0; i < 16; ++i)
-        {
-            root = sqrt(root);
-            if (bits & mask)
-                result *= root;
-            mask >>= 1;
-        }
-    }
-
-    return result;
 }
 
 time_t time(time_t *tloc) {

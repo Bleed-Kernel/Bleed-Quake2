@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include <devices/keyboard.h>
+#include <devices/mouse.h>
 #include <devices/hpet.h>
 #include <fcntl.h>
 #include <fs/file.h>
@@ -28,21 +29,9 @@ typedef struct {
     uint8_t a;
 } color_t;
 
-#ifndef MOUSE_BTN_LEFT
-#define MOUSE_BTN_LEFT   (1 << 0)
-#define MOUSE_BTN_RIGHT  (1 << 1)
-#define MOUSE_BTN_MIDDLE (1 << 2)
-
-typedef struct {
-    int16_t dx;
-    int16_t dy;
-    int8_t wheel;
-    uint8_t buttons;
-} mouse_event_t;
-#endif
-
 #define KEYQUEUE_SIZE 64
 #define HPET_DEVICE_PATH "/dev/hpet"
+#define MOUSE_DEVICE_PATH "/dev/mouse"
 
 #define TTY_ECHO         (1 << 1)
 #define TTY_CANNONICAL   (1 << 2)
@@ -238,14 +227,19 @@ static void handle_mouse_input(void) {
         g_mouse_dy += (int)ev.dy;
 
         {
+            static const uint8_t button_masks[] = {
+                MOUSE_BTN_LEFT,
+                MOUSE_BTN_RIGHT,
+                MOUSE_BTN_MIDDLE
+            };
             uint8_t changed = (uint8_t)(ev.buttons ^ g_old_mouse_buttons);
+            int i;
 
-            if (changed & MOUSE_BTN_LEFT)
-                Quake2_SendKey(K_MOUSE1, (ev.buttons & MOUSE_BTN_LEFT) ? true : false);
-            if (changed & MOUSE_BTN_RIGHT)
-                Quake2_SendKey(K_MOUSE2, (ev.buttons & MOUSE_BTN_RIGHT) ? true : false);
-            if (changed & MOUSE_BTN_MIDDLE)
-                Quake2_SendKey(K_MOUSE3, (ev.buttons & MOUSE_BTN_MIDDLE) ? true : false);
+            for (i = 0; i < (int)(sizeof(button_masks) / sizeof(button_masks[0])); ++i)
+            {
+                if (changed & button_masks[i])
+                    Quake2_SendKey(K_MOUSE1 + i, (ev.buttons & button_masks[i]) ? true : false);
+            }
 
             g_old_mouse_buttons = ev.buttons;
         }
@@ -351,7 +345,7 @@ int SWimp_Init(void *hInstance, void *wndProc) {
     if (g_tty_fd >= 0)
         _ioctl(g_tty_fd, TTY_IOCTL_SET_FLAGS, &tty_flags);
 
-    g_mouse_fd = _open("/dev/mouse0", O_RDONLY);
+    g_mouse_fd = _open(MOUSE_DEVICE_PATH, O_RDONLY);
 
     setup_video_buffer();
     return true;
@@ -484,6 +478,8 @@ void SWimp_AppActivate(qboolean active) {
 }
 
 static void handle_input(void) {
+    handle_mouse_input();
+
     while (g_key_queue_read_index != g_key_queue_write_index) {
         unsigned short key_data = g_key_queue[g_key_queue_read_index];
         int pressed = key_data >> 8;
@@ -510,6 +506,8 @@ int QG_Milliseconds(void) {
 }
 
 void QG_GetMouseDiff(int *dx, int *dy) {
+    handle_mouse_input();
+
     *dx = g_mouse_dx;
     *dy = g_mouse_dy;
     g_mouse_dx = 0;
