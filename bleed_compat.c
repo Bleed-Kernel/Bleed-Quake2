@@ -5,25 +5,13 @@
 #include <string.h>
 #include <stdint.h>
 #include <limits.h>
-#include <devices/hpet.h>
+#include <hpet.h>
 #include <fcntl.h>
-#include <syscalls/open.h>
-#include <syscalls/read.h>
-#include <syscalls/ioctl.h>
+#include <syscalls.h>
 #include "time.h"
 
 #define HPET_DEVICE_PATH "/dev/hpet"
 
-struct rtc_time_compat {
-    unsigned char sec;
-    unsigned char min;
-    unsigned char hour;
-    unsigned char day;
-    unsigned char mon;
-    unsigned short year;
-};
-
-extern int _time(struct rtc_time_compat *buf);
 static int g_hpet_fd = -2;
 
 static uint64_t hpet_now_femtoseconds(void) {
@@ -229,7 +217,7 @@ time_t time(time_t *tloc) {
 struct tm *localtime(const time_t *timer)
 {
     static struct tm out;
-    struct rtc_time_compat rtc;
+    rtc_time_t rtc;
 
     (void)timer;
 

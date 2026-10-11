@@ -5,7 +5,9 @@ BUILD_DIR := bin
 OBJ_DIR := $(BUILD_DIR)/obj
 BIN := $(BUILD_DIR)/$(TARGET)
 
-CC ?= x86_64-elf-gcc
+ifeq ($(origin CC),default)
+CC := x86_64-elf-gcc
+endif
 
 SYSROOT_DIR := sysroot
 LIB_DIR := $(SYSROOT_DIR)/lib
@@ -16,7 +18,7 @@ BLIBC_DIR ?= ../blibc
 BLIBC_REPO ?= https://codeberg.org/Bleed-Kernel/blibc.git
 BLIBC_AUTO_UPDATE ?= 0
 
-INCLUDES := -I$(SYSROOT_DIR)/include -I.
+INCLUDES := -I$(SYSROOT_DIR)/include -I$(SYSROOT_DIR)/include/bleed -I.
 
 CFLAGS_COMMON := \
 	-std=gnu11 \
@@ -208,7 +210,7 @@ $(BIN): $(CRT0) $(OBJS)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDFLAGS) -o $@ $(CRT0) $(OBJS) -l:blibc.a
 
-$(OBJ_DIR)/%.o: %.c
+$(OBJ_DIR)/%.o: %.c | $(LIBC)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -238,6 +240,7 @@ blibc_sync:
 	@echo "[BLIBC] Building $(BLIBC_DIR)"
 	@$(MAKE) -C "$(BLIBC_DIR)"
 	@echo "[BLIBC] Syncing sysroot -> $(SYSROOT_DIR)"
+	@rm -rf "$(SYSROOT_DIR)"
 	@mkdir -p "$(SYSROOT_DIR)"
 	@cp -a "$(BLIBC_DIR)/sysroot/." "$(SYSROOT_DIR)/"
 	@test -f "$(LIBC)"

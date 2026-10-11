@@ -3,17 +3,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <devices/keyboard.h>
-#include <devices/mouse.h>
-#include <devices/hpet.h>
+#include <keyboard.h>
+#include <mouse.h>
+#include <hpet.h>
 #include <fcntl.h>
-#include <fs/file.h>
-#include <graphics/display.h>
+#include <display.h>
 #include <sys/ioctl.h>
-#include <syscalls/close.h>
-#include <syscalls/open.h>
-#include <syscalls/read.h>
-#include <syscalls/ioctl.h>
+#include <syscalls.h>
 
 #include "quake2.h"
 #include "client/keys.h"
