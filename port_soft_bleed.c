@@ -4,12 +4,13 @@
 #include <string.h>
 
 #include <keyboard.h>
-#include <mouse.h>
 #include <hpet.h>
 #include <fcntl.h>
-#include <display.h>
-#include <sys/ioctl.h>
 #include <syscalls.h>
+
+// the crime-scene window library, this port only runs as a window on the desktop
+#include <crime/crime.h>
+#include <crime/sys.h>
 
 #include "quake2.h"
 #include "client/keys.h"
@@ -27,25 +28,18 @@ typedef struct {
 
 #define KEYQUEUE_SIZE 64
 #define HPET_DEVICE_PATH "/dev/hpet"
-#define MOUSE_DEVICE_PATH "/dev/mouse"
 
-#define TTY_ECHO         (1 << 1)
-#define TTY_CANNONICAL   (1 << 2)
-#define TTY_NONBLOCK     (1 << 4)
-#define TTY_FLAGS_QUAKE  (TTY_NONBLOCK)
+// the window opens at this size, the game picture is stretched to whatever it is after that
+#define WINDOW_WIDTH  640
+#define WINDOW_HEIGHT 480
+
+// modes this narrow or less get a window twice their size
+#define SMALL_MODE_WIDTH 400
 
 static color_t g_colors[256];
-static uint16_t g_palette_565[256];
 static uint32_t g_palette_xrgb8888[256];
-static uint8_t g_palette_bgr24[256][3];
 
-static int g_fb_fd = -1;
-static uint8_t *g_fb_backbuffer = NULL;
-static struct fb_info g_fb_info;
-static uint64_t g_fb_pitch_bytes = 0;
-
-static int g_tty_fd = -1;
-static int g_mouse_fd = -1;
+static cs_window_t *g_window = NULL;
 
 static int g_width = 640;
 static int g_height = 480;
@@ -58,7 +52,7 @@ static unsigned int g_key_queue_read_index = 0;
 static int g_mouse_captured = 0;
 static int g_mouse_dx = 0;
 static int g_mouse_dy = 0;
-static uint8_t g_old_mouse_buttons = 0;
+static uint32_t g_old_mouse_buttons = 0;
 static int g_hpet_fd = -2;
 
 static uint64_t hpet_now_femtoseconds(void) {
@@ -77,14 +71,6 @@ static uint64_t hpet_now_femtoseconds(void) {
         return now;
 
     return 0;
-}
-
-static void close_fd_if_open(int *fd) {
-    if (*fd >= 0)
-    {
-        _close(*fd);
-        *fd = -1;
-    }
 }
 
 static void apply_new_keybinds(void) {
@@ -188,56 +174,65 @@ static void setup_video_buffer(void) {
     vid.buffer = (pixel_t *)g_screen_memory;
 }
 
-static void handle_keyboard_input(void) {
-    keyboard_event_t ev;
-    long read_count;
+static void mouse_buttons(uint32_t buttons) {
+    static const uint32_t button_masks[] = {
+        CS_BUTTON_LEFT,
+        CS_BUTTON_RIGHT,
+        CS_BUTTON_MIDDLE
+    };
+    uint32_t changed = buttons ^ g_old_mouse_buttons;
+    int i;
 
-    for (;;)
+    for (i = 0; i < (int)(sizeof(button_masks) / sizeof(button_masks[0])); ++i)
     {
-        read_count = _read(0, &ev, sizeof(ev));
-        if (read_count != (long)sizeof(ev))
-            break;
-
-        {
-            unsigned char key = map_key(&ev);
-            if (key)
-                add_key_to_queue(ev.action == KEY_DOWN ? 1 : 0, key);
-        }
+        if (changed & button_masks[i])
+            Quake2_SendKey(K_MOUSE1 + i, (buttons & button_masks[i]) ? true : false);
     }
+
+    g_old_mouse_buttons = buttons;
 }
 
-static void handle_mouse_input(void) {
-    mouse_event_t ev;
-    long read_count;
+// take everything the desktop sent since last time. keys are queued for handle_input
+static void pump_events(void) {
+    cs_event_t ev;
 
-    if (!g_mouse_captured || g_mouse_fd < 0)
+    if (!g_window)
         return;
 
-    for (;;)
+    while (cs_event_wait(&ev, 0))
     {
-        read_count = _read(g_mouse_fd, &ev, sizeof(ev));
-        if (read_count != (long)sizeof(ev))
-            break;
-
-        g_mouse_dx += (int)ev.dx;
-        g_mouse_dy += (int)ev.dy;
-
+        switch (ev.type)
         {
-            static const uint8_t button_masks[] = {
-                MOUSE_BTN_LEFT,
-                MOUSE_BTN_RIGHT,
-                MOUSE_BTN_MIDDLE
-            };
-            uint8_t changed = (uint8_t)(ev.buttons ^ g_old_mouse_buttons);
-            int i;
-
-            for (i = 0; i < (int)(sizeof(button_masks) / sizeof(button_masks[0])); ++i)
-            {
-                if (changed & button_masks[i])
-                    Quake2_SendKey(K_MOUSE1 + i, (ev.buttons & button_masks[i]) ? true : false);
+            case CS_EV_KEY: {
+                keyboard_event_t key_event = {
+                    .keycode = ev.keycode,
+                    .action  = ev.key_action,
+                    .keymod  = ev.keymod,
+                };
+                unsigned char key = map_key(&key_event);
+                if (key)
+                    add_key_to_queue(key_event.action == KEY_DOWN ? 1 : 0, key);
+                break;
             }
 
-            g_old_mouse_buttons = ev.buttons;
+            // only sent while the pointer is locked to us, how far the mouse moved
+            case CS_EV_MOUSE_RELATIVE:
+                if (g_mouse_captured)
+                {
+                    g_mouse_dx += ev.x;
+                    g_mouse_dy += ev.y;
+                    mouse_buttons(ev.buttons);
+                }
+                break;
+
+            case CS_EV_CLOSE_REQUEST:
+                cs_window_close(g_window);
+                exit(0);
+                break;
+
+            // a resize needs nothing doing here, the next frame is stretched to the new size
+            default:
+                break;
         }
     }
 }
@@ -257,17 +252,6 @@ rserr_t SWimp_SetMode(int *pwidth, int *pheight, int mode, qboolean fullscreen) 
         return rserr_invalid_mode;
     }
 
-    /* vbox is sensitive to larger software modes on a smaller boot FB. */
-    if (g_fb_info.width && g_fb_info.height &&
-        (width > (int)g_fb_info.width || height > (int)g_fb_info.height))
-    {
-        ri.Con_Printf(PRINT_ALL, " mode %dx%d exceeds framebuffer %llux%llu\n",
-            width, height,
-            (unsigned long long)g_fb_info.width,
-            (unsigned long long)g_fb_info.height);
-        return rserr_invalid_mode;
-    }
-
     ri.Con_Printf(PRINT_ALL, " %d %d\n", width, height);
 
     g_width = width;
@@ -277,29 +261,23 @@ rserr_t SWimp_SetMode(int *pwidth, int *pheight, int mode, qboolean fullscreen) 
 
     setup_video_buffer();
 
+    if (g_window)
+    {
+        int scale = (width <= SMALL_MODE_WIDTH) ? 2 : 1;
+        cs_window_resize(g_window, width * scale, height * scale);
+    }
+
     ri.Vid_NewWindow(width, height);
     return rserr_ok;
 }
 
 void SWimp_Shutdown(void) {
-    close_fd_if_open(&g_mouse_fd);
-    close_fd_if_open(&g_tty_fd);
-    close_fd_if_open(&g_fb_fd);
-
     if (g_screen_memory)
     {
         free(g_screen_memory);
         g_screen_memory = NULL;
     }
 
-    if (g_fb_backbuffer)
-    {
-        free(g_fb_backbuffer);
-        g_fb_backbuffer = NULL;
-    }
-
-    g_fb_pitch_bytes = 0;
-    memset(&g_fb_info, 0, sizeof(g_fb_info));
     g_key_queue_read_index = 0;
     g_key_queue_write_index = 0;
     g_mouse_dx = 0;
@@ -308,47 +286,19 @@ void SWimp_Shutdown(void) {
     g_mouse_captured = 0;
 }
 
+// the window itself is opened in main before any of this, it outlives a renderer restart
 int SWimp_Init(void *hInstance, void *wndProc) {
-    uint32_t tty_flags = TTY_FLAGS_QUAKE;
-
     (void)hInstance;
     (void)wndProc;
 
-    g_fb_fd = _open("/dev/fb0", O_RDWR);
-    if (g_fb_fd < 0)
+    if (!g_window)
     {
-        Sys_Error("failed to open /dev/fb0\n");
-        goto fail;
+        Sys_Error("no window to draw into\n");
+        return false;
     }
-
-    if (_ioctl(g_fb_fd, FB_IOC_GET_INFO, &g_fb_info) < 0)
-    {
-        Sys_Error("failed FB_IOC_GET_INFO on /dev/fb0\n");
-        goto fail;
-    }
-
-    g_fb_pitch_bytes = g_fb_info.pitch;
-    g_fb_backbuffer = (uint8_t *)malloc((size_t)g_fb_info.height * (size_t)g_fb_pitch_bytes);
-    if (!g_fb_backbuffer)
-    {
-        Sys_Error("failed to allocate framebuffer backbuffer\n");
-        goto fail;
-    }
-    memset(g_fb_backbuffer, 0, (size_t)g_fb_info.height * (size_t)g_fb_pitch_bytes);
-
-    _ioctl(0, TTY_IOCTL_SET_FLAGS, &tty_flags);
-    g_tty_fd = _open("/dev/tty0", O_RDWR);
-    if (g_tty_fd >= 0)
-        _ioctl(g_tty_fd, TTY_IOCTL_SET_FLAGS, &tty_flags);
-
-    g_mouse_fd = _open(MOUSE_DEVICE_PATH, O_RDONLY);
 
     setup_video_buffer();
     return true;
-
-fail:
-    SWimp_Shutdown();
-    return false;
 }
 
 void SWimp_SetPalette(const unsigned char *palette) {
@@ -362,20 +312,11 @@ void SWimp_SetPalette(const unsigned char *palette) {
         g_colors[i].a = 255;
         palette++;
 
-        g_palette_565[i] =
-            (uint16_t)(((uint16_t)(g_colors[i].r >> 3) << 11) |
-                       ((uint16_t)(g_colors[i].g >> 2) << 5)  |
-                       ((uint16_t)(g_colors[i].b >> 3)));
-
         g_palette_xrgb8888[i] =
             0xFF000000u |
             ((uint32_t)g_colors[i].r << 16) |
             ((uint32_t)g_colors[i].g << 8) |
             (uint32_t)g_colors[i].b;
-
-        g_palette_bgr24[i][0] = g_colors[i].b;
-        g_palette_bgr24[i][1] = g_colors[i].g;
-        g_palette_bgr24[i][2] = g_colors[i].r;
     }
 }
 
@@ -383,90 +324,99 @@ void SWimp_BeginFrame(float camera_seperation) {
     (void)camera_seperation;
 }
 
+// one row of the game picture through the palette, each pixel repeated scale times
+static void convert_row(uint32_t *dst, const uint8_t *src, int width, int scale) {
+    int x;
+
+    if (scale == 1)
+    {
+        for (x = 0; x < width; ++x)
+            dst[x] = g_palette_xrgb8888[src[x]];
+        return;
+    }
+
+    for (x = 0; x < width; ++x)
+    {
+        uint32_t colour = g_palette_xrgb8888[src[x]];
+        int i;
+        for (i = 0; i < scale; ++i)
+            *dst++ = colour;
+    }
+}
+
 void SWimp_EndFrame(void) {
+    static uint32_t *x_map = NULL;
+    static int x_map_width = 0;
+    static int x_map_source = 0;
     int x;
     int y;
-    int fbw;
-    int fbh;
-    int copy_width;
-    int copy_height;
-    int ox;
-    int oy;
-    int bytes_per_pixel;
-    int max_pitch_pixels;
-    const uint8_t *src_base;
-    qboolean needs_clear;
+    int out_w;
+    int out_h;
+    int scale;
+    size_t row_bytes;
 
-    if (!g_fb_backbuffer || !g_screen_memory)
+    if (!g_window || !g_screen_memory)
         return;
 
-    fbw = (int)g_fb_info.width;
-    fbh = (int)g_fb_info.height;
-    bytes_per_pixel = (int)(g_fb_info.bpp / 8);
-    if (bytes_per_pixel <= 0)
-        bytes_per_pixel = 4;
-    max_pitch_pixels = (int)(g_fb_pitch_bytes / (uint64_t)bytes_per_pixel);
-    if (max_pitch_pixels < fbw)
-        fbw = max_pitch_pixels;
+    out_w = g_window->width;
+    out_h = g_window->height;
+    row_bytes = (size_t)out_w * sizeof(uint32_t);
 
-    copy_width = g_width < fbw ? g_width : fbw;
-    copy_height = g_height < fbh ? g_height : fbh;
-    ox = (fbw > copy_width) ? (fbw - copy_width) / 2 : 0;
-    oy = (fbh > copy_height) ? (fbh - copy_height) / 2 : 0;
-    src_base = (const uint8_t *)g_screen_memory;
-    needs_clear = (copy_width != fbw || copy_height != fbh) ? true : false;
-
-    if (needs_clear)
-        memset(g_fb_backbuffer, 0, (size_t)fbh * (size_t)g_fb_pitch_bytes);
-
-    if (g_fb_info.bpp == 16)
+    scale = out_w / g_width;
+    if (scale >= 1 && out_w == g_width * scale && out_h == g_height * scale)
     {
-        for (y = 0; y < copy_height; ++y)
+        for (y = 0; y < g_height; ++y)
         {
-            const uint8_t *src = src_base + (size_t)y * (size_t)g_width;
-            uint16_t *dst = (uint16_t *)(g_fb_backbuffer + (size_t)(y + oy) * (size_t)g_fb_pitch_bytes);
-            dst += ox;
-            for (x = 0; x < copy_width; ++x)
-            {
-                dst[x] = g_palette_565[src[x]];
-            }
-        }
-    }
-    else if (g_fb_info.bpp == 24)
-    {
-        for (y = 0; y < copy_height; ++y)
-        {
-            const uint8_t *src = src_base + (size_t)y * (size_t)g_width;
-            uint8_t *dst = g_fb_backbuffer + (size_t)(y + oy) * (size_t)g_fb_pitch_bytes + (size_t)ox * 3u;
-            for (x = 0; x < copy_width; ++x)
-            {
-                const uint8_t *bgr = g_palette_bgr24[src[x]];
-                dst[0] = bgr[0];
-                dst[1] = bgr[1];
-                dst[2] = bgr[2];
-                dst += 3;
-            }
+            const uint8_t *src = (const uint8_t *)g_screen_memory + (size_t)y * (size_t)g_width;
+            uint32_t *dst = g_window->pixels + (size_t)(y * scale) * (size_t)g_window->pitch;
+            int i;
+
+            // the first of the repeated rows is worked out, the rest are just copies of it
+            convert_row(dst, src, g_width, scale);
+            for (i = 1; i < scale; ++i)
+                memcpy(dst + (size_t)i * (size_t)g_window->pitch, dst, row_bytes);
         }
     }
     else
     {
-        for (y = 0; y < copy_height; ++y)
+        int last_src_y = -1;
+
+        if (out_w != x_map_width || g_width != x_map_source)
         {
-            const uint8_t *src = src_base + (size_t)y * (size_t)g_width;
-            uint32_t *dst = (uint32_t *)(g_fb_backbuffer + (size_t)(y + oy) * (size_t)g_fb_pitch_bytes);
-            dst += ox;
-            for (x = 0; x < copy_width; ++x)
+            if (x_map)
+                free(x_map);
+            x_map = (uint32_t *)malloc((size_t)out_w * sizeof(uint32_t));
+            if (!x_map)
+                return;
+
+            for (x = 0; x < out_w; ++x)
+                x_map[x] = (uint32_t)(((uint64_t)x * (uint64_t)g_width) / (uint64_t)out_w);
+
+            x_map_width = out_w;
+            x_map_source = g_width;
+        }
+
+        for (y = 0; y < out_h; ++y)
+        {
+            int src_y = (int)(((int64_t)y * g_height) / out_h);
+            const uint8_t *src = (const uint8_t *)g_screen_memory + (size_t)src_y * (size_t)g_width;
+            uint32_t *dst = g_window->pixels + (size_t)y * (size_t)g_window->pitch;
+
+            // stretched taller than the picture, so this row is the one above it again
+            if (src_y == last_src_y)
             {
-                dst[x] = g_palette_xrgb8888[src[x]];
+                memcpy(dst, dst - g_window->pitch, row_bytes);
+                continue;
             }
+            last_src_y = src_y;
+
+            for (x = 0; x < out_w; ++x)
+                dst[x] = g_palette_xrgb8888[src[x_map[x]]];
         }
     }
 
-    if (g_fb_fd >= 0)
-        _ioctl(g_fb_fd, FB_IOC_FLIP, g_fb_backbuffer);
-
-    handle_keyboard_input();
-    handle_mouse_input();
+    cs_window_commit(g_window, 0, 0, out_w, out_h);
+    pump_events();
 }
 
 void SWimp_AppActivate(qboolean active) {
@@ -474,7 +424,7 @@ void SWimp_AppActivate(qboolean active) {
 }
 
 static void handle_input(void) {
-    handle_mouse_input();
+    pump_events();
 
     while (g_key_queue_read_index != g_key_queue_write_index) {
         unsigned short key_data = g_key_queue[g_key_queue_read_index];
@@ -502,7 +452,7 @@ int QG_Milliseconds(void) {
 }
 
 void QG_GetMouseDiff(int *dx, int *dy) {
-    handle_mouse_input();
+    pump_events();
 
     *dx = g_mouse_dx;
     *dy = g_mouse_dy;
@@ -510,12 +460,24 @@ void QG_GetMouseDiff(int *dx, int *dy) {
     g_mouse_dy = 0;
 }
 
+// the engine captures the mouse while the game is being played and lets go for the console
 void QG_CaptureMouse(void) {
+    if (g_mouse_captured)
+        return;
     g_mouse_captured = 1;
+    if (g_window)
+        cs_pointer_lock(g_window, 1);
 }
 
 void QG_ReleaseMouse(void) {
+    if (!g_mouse_captured)
+        return;
     g_mouse_captured = 0;
+    g_mouse_dx = 0;
+    g_mouse_dy = 0;
+    mouse_buttons(0);
+    if (g_window)
+        cs_pointer_lock(g_window, 0);
 }
 
 int main(int argc, char **argv) {
@@ -554,6 +516,14 @@ int main(int argc, char **argv) {
         }
     }
 
+    // before anything is loaded, theres no point reading the pak just to find nowhere to draw
+    g_window = cs_window_open(WINDOW_WIDTH, WINDOW_HEIGHT, "Quake II");
+    if (!g_window)
+    {
+        printf("quake2: this needs the crime-scene desktop, start that and run quake2 from a terminal in it\n");
+        return 1;
+    }
+
     Quake2_Init(argc, argv);
     apply_new_keybinds();
 
@@ -561,10 +531,15 @@ int main(int argc, char **argv) {
     while (1)
     {
         handle_input();
-        do {
+
+        // asleep until the next millisecond instead of spinning, the desktop has other windows to draw
+        for (;;) {
             newtime = Quake2_Milliseconds();
             time = newtime - oldtime;
-        } while (time < 1);
+            if (time >= 1)
+                break;
+            poll(NULL, 0, 1);
+        }
 
         Quake2_Frame(time);
         oldtime = newtime;

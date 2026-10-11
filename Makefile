@@ -18,7 +18,11 @@ BLIBC_DIR ?= ../blibc
 BLIBC_REPO ?= https://codeberg.org/Bleed-Kernel/blibc.git
 BLIBC_AUTO_UPDATE ?= 0
 
-INCLUDES := -I$(SYSROOT_DIR)/include -I$(SYSROOT_DIR)/include/bleed -I.
+CRIME_DIR ?= ../Crime-Scene
+CRIME_REPO ?= https://github.com/Bleed-Kernel/Crime-Scene.git
+LIBCRIME := $(CRIME_DIR)/bin/libcrime.a
+
+INCLUDES := -I$(SYSROOT_DIR)/include -I$(SYSROOT_DIR)/include/bleed -I. -I$(CRIME_DIR)/include
 
 CFLAGS_COMMON := \
 	-std=gnu11 \
@@ -42,7 +46,8 @@ CFLAGS_COMMON := \
 	$(INCLUDES)
 
 OPTIONAL_FLAGS := \
-	-O2 \
+	-O3 \
+	-funroll-loops \
 	-fomit-frame-pointer \
 	-fno-asynchronous-unwind-tables \
 	-fno-unwind-tables \
@@ -200,21 +205,30 @@ C_SRCS := \
 
 OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(C_SRCS))
 
-.PHONY: all build clean distclean blibc blibc_sync
+.PHONY: all build clean distclean blibc blibc_sync crime
 
-all: blibc $(BIN)
+all: blibc crime $(BIN)
 
 build: all
 
-$(BIN): $(CRT0) $(OBJS)
+$(BIN): $(CRT0) $(OBJS) $(LIBCRIME)
 	@mkdir -p $(dir $@)
-	$(CC) $(LDFLAGS) -o $@ $(CRT0) $(OBJS) -l:blibc.a
+	$(CC) $(LDFLAGS) -o $@ $(CRT0) $(OBJS) $(LIBCRIME) -l:blibc.a
 
-$(OBJ_DIR)/%.o: %.c | $(LIBC)
+$(OBJ_DIR)/%.o: %.c | $(LIBC) $(LIBCRIME)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 blibc: $(LIBC)
+
+crime: $(LIBCRIME)
+
+$(LIBCRIME): | $(LIBC)
+	@echo "[CRIME] Preparing the window library"
+	@if [ ! -d "$(CRIME_DIR)" ]; then \
+		git clone "$(CRIME_REPO)" "$(CRIME_DIR)"; \
+	fi
+	@$(MAKE) -C "$(CRIME_DIR)" bin/libcrime.a BLIBC_DIR="$(abspath $(BLIBC_DIR))"
 
 $(CRT0): $(LIBC)
 	@if [ ! -f "$@" ]; then \
