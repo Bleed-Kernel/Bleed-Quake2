@@ -18,11 +18,10 @@ BLIBC_DIR ?= ../blibc
 BLIBC_REPO ?= https://codeberg.org/Bleed-Kernel/blibc.git
 BLIBC_AUTO_UPDATE ?= 0
 
-# libcrime.a is prebuilt and sits in the root here, only the headers come from CRIME_DIR
-CRIME_DIR ?= ../Crime-Scene
+CRIME_INC := include
 LIBCRIME := libcrime.a
 
-INCLUDES := -I$(SYSROOT_DIR)/include -I$(SYSROOT_DIR)/include/bleed -I. -I$(CRIME_DIR)/include
+INCLUDES := -I$(SYSROOT_DIR)/include -I$(SYSROOT_DIR)/include/bleed -I. -I$(CRIME_INC)
 
 CFLAGS_COMMON := \
 	-std=gnu11 \
