@@ -18,9 +18,9 @@ BLIBC_DIR ?= ../blibc
 BLIBC_REPO ?= https://codeberg.org/Bleed-Kernel/blibc.git
 BLIBC_AUTO_UPDATE ?= 0
 
+# libcrime.a is prebuilt and sits in the root here, only the headers come from CRIME_DIR
 CRIME_DIR ?= ../Crime-Scene
-CRIME_REPO ?= https://github.com/Bleed-Kernel/Crime-Scene.git
-LIBCRIME := $(CRIME_DIR)/bin/libcrime.a
+LIBCRIME := libcrime.a
 
 INCLUDES := -I$(SYSROOT_DIR)/include -I$(SYSROOT_DIR)/include/bleed -I. -I$(CRIME_DIR)/include
 
@@ -223,12 +223,9 @@ blibc: $(LIBC)
 
 crime: $(LIBCRIME)
 
-$(LIBCRIME): | $(LIBC)
-	@echo "[CRIME] Preparing the window library"
-	@if [ ! -d "$(CRIME_DIR)" ]; then \
-		git clone "$(CRIME_REPO)" "$(CRIME_DIR)"; \
-	fi
-	@$(MAKE) -C "$(CRIME_DIR)" bin/libcrime.a BLIBC_DIR="$(abspath $(BLIBC_DIR))"
+# never fetched or rebuilt, the prebuilt one is the only one we link
+$(LIBCRIME):
+	@echo "[CRIME] $(LIBCRIME) is missing, put the prebuilt library there"; exit 1
 
 $(CRT0): $(LIBC)
 	@if [ ! -f "$@" ]; then \

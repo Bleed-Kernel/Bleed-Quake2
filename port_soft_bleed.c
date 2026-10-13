@@ -520,7 +520,7 @@ int main(int argc, char **argv) {
     g_window = cs_window_open(WINDOW_WIDTH, WINDOW_HEIGHT, "Quake II");
     if (!g_window)
     {
-        printf("quake2: this needs the crime-scene desktop, start that and run quake2 from a terminal in it\n");
+        printf("CrimeScene Display Server is not running\n");
         return 1;
     }
 
