@@ -18,8 +18,11 @@ BLIBC_DIR ?= ../blibc
 BLIBC_REPO ?= https://codeberg.org/Bleed-Kernel/blibc.git
 BLIBC_AUTO_UPDATE ?= 0
 
-CRIME_INC := include
-LIBCRIME := libcrime.a
+CRIME_REPO ?= https://github.com/Bleed-Kernel/Crime-Scene.git
+CRIME_DIR ?= $(if $(wildcard ../Crime-Scene/Makefile),../Crime-Scene,external/crime-scene)
+CRIME_OUT := libcrime
+CRIME_INC := $(CRIME_OUT)/include
+LIBCRIME := $(CRIME_OUT)/libcrime.a
 
 INCLUDES := -I$(SYSROOT_DIR)/include -I$(SYSROOT_DIR)/include/bleed -I. -I$(CRIME_INC)
 
@@ -220,11 +223,23 @@ $(OBJ_DIR)/%.o: %.c | $(LIBC) $(LIBCRIME)
 
 blibc: $(LIBC)
 
-crime: $(LIBCRIME)
+# a checkout handed in with CRIME_DIR is left as it is, only our own clone gets pulled.
+# cp -p keeps the headers times so a pull that changed nothing doesnt rebuild anything
+crime: | $(LIBC)
+	@echo "[CRIME] Preparing crime-scene"
+	@if [ ! -d "$(CRIME_DIR)" ]; then \
+		git clone $(CRIME_REPO) $(CRIME_DIR); \
+	elif [ "$(CRIME_DIR)" = "external/crime-scene" ]; then \
+		git -C $(CRIME_DIR) pull --ff-only || echo "[CRIME] couldnt pull, building whats there"; \
+	fi
+	@$(MAKE) -C $(CRIME_DIR) bin/libcrime.a BLIBC_DIR=$(abspath $(BLIBC_DIR))
+	@echo "[CRIME] Syncing $(CRIME_OUT)"
+	@rm -rf $(CRIME_OUT)/include
+	@mkdir -p $(CRIME_OUT)/include/crime
+	@cp -p $(CRIME_DIR)/include/crime/*.h $(CRIME_OUT)/include/crime/
+	@cmp -s $(CRIME_DIR)/bin/libcrime.a $(LIBCRIME) || cp -p $(CRIME_DIR)/bin/libcrime.a $(LIBCRIME)
 
-# never fetched or rebuilt, the prebuilt one is the only one we link
-$(LIBCRIME):
-	@echo "[CRIME] $(LIBCRIME) is missing, put the prebuilt library there"; exit 1
+$(LIBCRIME): | crime ;
 
 $(CRT0): $(LIBC)
 	@if [ ! -f "$@" ]; then \
@@ -259,4 +274,4 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 distclean: clean
-	rm -rf $(SYSROOT_DIR)
+	rm -rf $(SYSROOT_DIR) external $(CRIME_OUT)

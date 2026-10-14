@@ -8,3 +8,5 @@ Debug
 Release
 bin/
 sysroot/
+external/
+libcrime/

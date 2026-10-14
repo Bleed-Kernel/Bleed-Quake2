@@ -10,7 +10,6 @@
 
 // the crime-scene window library, this port only runs as a window on the desktop
 #include <crime/crime.h>
-#include <crime/sys.h>
 
 #include "quake2.h"
 #include "client/keys.h"
