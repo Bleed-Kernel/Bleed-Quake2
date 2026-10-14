@@ -15,7 +15,7 @@ CRT0 := $(LIB_DIR)/start.o
 LIBC := $(LIB_DIR)/blibc.a
 
 BLIBC_DIR ?= ../blibc
-BLIBC_REPO ?= https://codeberg.org/Bleed-Kernel/blibc.git
+BLIBC_REPO ?= https://github.com/Bleed-Kernel/blibc.git
 BLIBC_AUTO_UPDATE ?= 0
 
 CRIME_REPO ?= https://github.com/Bleed-Kernel/Crime-Scene.git
@@ -230,7 +230,7 @@ crime: | $(LIBC)
 	@if [ ! -d "$(CRIME_DIR)" ]; then \
 		git clone $(CRIME_REPO) $(CRIME_DIR); \
 	elif [ "$(CRIME_DIR)" = "external/crime-scene" ]; then \
-		git -C $(CRIME_DIR) pull --ff-only || echo "[CRIME] couldnt pull, building whats there"; \
+		cd $(CRIME_DIR) && git pull --rebase; \
 	fi
 	@$(MAKE) -C $(CRIME_DIR) bin/libcrime.a BLIBC_DIR=$(abspath $(BLIBC_DIR))
 	@echo "[CRIME] Syncing $(CRIME_OUT)"
