@@ -213,9 +213,26 @@ all: blibc crime $(BIN)
 
 build: all
 
-$(BIN): $(CRT0) $(OBJS) $(LIBCRIME)
+OBJCOPY := $(shell command -v x86_64-elf-objcopy >/dev/null 2>&1 && echo x86_64-elf-objcopy || echo objcopy)
+ICONS   := $(wildcard res/icon-16.png res/icon-32.png res/icon-48.png)
+
+define embed_icons
+	@for px in 16 32 48; do \
+		if [ -f res/icon-$$px.png ]; then \
+			$(OBJCOPY) --add-section .bleed.icon$$px=res/icon-$$px.png \
+				--set-section-flags .bleed.icon$$px=noload,readonly $(1) || exit 1; \
+		fi; \
+	done
+	@if [ -f res/app.txt ]; then \
+		$(OBJCOPY) --add-section .bleed.app=res/app.txt \
+			--set-section-flags .bleed.app=noload,readonly $(1) || exit 1; \
+	fi
+endef
+
+$(BIN): $(CRT0) $(OBJS) $(LIBCRIME) $(ICONS)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDFLAGS) -o $@ $(CRT0) $(OBJS) $(LIBCRIME) -l:blibc.a
+	$(call embed_icons,$@)
 
 $(OBJ_DIR)/%.o: %.c | $(LIBC) $(LIBCRIME)
 	@mkdir -p $(dir $@)
