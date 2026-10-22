@@ -24,7 +24,12 @@ CRIME_OUT := libcrime
 CRIME_INC := $(CRIME_OUT)/include
 LIBCRIME := $(CRIME_OUT)/libcrime.a
 
-INCLUDES := -I$(SYSROOT_DIR)/include -I$(SYSROOT_DIR)/include/bleed -I. -I$(CRIME_INC)
+AUDIO_REPO ?= https://github.com/Bleed-Kernel/libaudio.git
+AUDIO_DIR ?= $(if $(wildcard ../libaudio/Makefile),../libaudio,external/libaudio)
+AUDIO_OUT := libaudio
+LIBAUDIO := $(AUDIO_OUT)/libaudio.a
+
+INCLUDES := -I$(SYSROOT_DIR)/include -I$(SYSROOT_DIR)/include/bleed -I. -I$(CRIME_INC) -I$(AUDIO_OUT)/include
 
 CFLAGS_COMMON := \
 	-std=gnu11 \
@@ -117,7 +122,7 @@ OTHER_SRCS := \
 
 NULL_SRCS := null/cd_null.c
 NET_SRCS := net/net_loopback.c
-SOUND_SRCS := sound/snddma_null.c
+SOUND_SRCS := sound/snddma_bleed.c
 
 GAME_SRCS := \
 	game/g_ai.c \
@@ -207,9 +212,9 @@ C_SRCS := \
 
 OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(C_SRCS))
 
-.PHONY: all build clean distclean blibc blibc_sync crime
+.PHONY: all build clean distclean blibc blibc_sync crime audio
 
-all: blibc crime $(BIN)
+all: blibc crime audio $(BIN)
 
 build: all
 
@@ -229,20 +234,23 @@ define embed_icons
 	fi
 endef
 
-$(BIN): $(CRT0) $(OBJS) $(LIBCRIME) $(ICONS)
+$(BIN): $(CRT0) $(OBJS) $(LIBCRIME) $(LIBAUDIO) $(ICONS)
 	@mkdir -p $(dir $@)
-	$(CC) $(LDFLAGS) -o $@ $(CRT0) $(OBJS) $(LIBCRIME) -l:blibc.a
+	$(CC) $(LDFLAGS) -o $@ $(CRT0) $(OBJS) $(LIBCRIME) $(LIBAUDIO) -l:blibc.a
 	$(call embed_icons,$@)
 
-$(OBJ_DIR)/%.o: %.c | $(LIBC) $(LIBCRIME)
+$(OBJ_DIR)/%.o: %.c | blibc $(LIBCRIME) $(LIBAUDIO)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-blibc: $(LIBC)
+# synced every build, a sysroot only filled in when blibc.a was missing went stale against blibc
+# fixes. everything that compiles against it waits for this
+blibc:
+	@$(MAKE) --no-print-directory blibc_sync
 
 # a checkout handed in with CRIME_DIR is left as it is, only our own clone gets pulled.
 # cp -p keeps the headers times so a pull that changed nothing doesnt rebuild anything
-crime: | $(LIBC)
+crime: | blibc
 	@echo "[CRIME] Preparing crime-scene"
 	@if [ ! -d "$(CRIME_DIR)" ]; then \
 		git clone $(CRIME_REPO) $(CRIME_DIR); \
@@ -258,18 +266,25 @@ crime: | $(LIBC)
 
 $(LIBCRIME): | crime ;
 
-$(CRT0): $(LIBC)
-	@if [ ! -f "$@" ]; then \
-		echo "[BLIBC] Missing $@, refreshing sysroot"; \
-		$(MAKE) blibc_sync; \
+# same deal as crime, sibling checkout as it is, our own clone pulled
+audio: | blibc
+	@echo "[AUDIO] Preparing libaudio"
+	@if [ ! -d "$(AUDIO_DIR)" ]; then \
+		git clone $(AUDIO_REPO) $(AUDIO_DIR); \
+	elif [ "$(AUDIO_DIR)" = "external/libaudio" ]; then \
+		cd $(AUDIO_DIR) && git pull --rebase; \
 	fi
-	@test -f "$@"
+	@$(MAKE) -C $(AUDIO_DIR) bin/libaudio.a BLIBC_DIR=$(abspath $(BLIBC_DIR))
+	@echo "[AUDIO] Syncing $(AUDIO_OUT)"
+	@rm -rf $(AUDIO_OUT)/include
+	@mkdir -p $(AUDIO_OUT)/include
+	@cp -p $(AUDIO_DIR)/include/bleed_audio.h $(AUDIO_OUT)/include/
+	@cmp -s $(AUDIO_DIR)/bin/libaudio.a $(LIBAUDIO) || cp -p $(AUDIO_DIR)/bin/libaudio.a $(LIBAUDIO)
 
-$(LIBC):
-	@if [ ! -f "$(LIBC)" ]; then \
-		echo "[BLIBC] Missing $(LIBC), preparing local blibc sysroot"; \
-		$(MAKE) blibc_sync; \
-	fi
+$(LIBAUDIO): | audio ;
+
+# the blibc sync makes both, a second sync of their own would race it on a parallel build
+$(CRT0) $(LIBC): | blibc ;
 
 blibc_sync:
 	@if [ ! -d "$(BLIBC_DIR)" ]; then \
@@ -291,4 +306,4 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 distclean: clean
-	rm -rf $(SYSROOT_DIR) external $(CRIME_OUT)
+	rm -rf $(SYSROOT_DIR) external $(CRIME_OUT) $(AUDIO_OUT)
