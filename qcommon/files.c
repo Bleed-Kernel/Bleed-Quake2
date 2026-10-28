@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "qcommon.h"
+#include "../quakegeneric.h"
 
 // define this to dissalow any data but the demo pak file
 //#define	NO_ADDONS
@@ -850,8 +851,8 @@ void FS_InitFilesystem (void)
 	// allows the game to run from outside the data tree
 	//
 	fs_basedir = Cvar_Get ("basedir", ".", CVAR_NOSET);
-	if (strcmp(fs_basedir->string, "/initrd"))
-		Cvar_ForceSet("basedir", "/initrd");
+	if (strcmp(fs_basedir->string, QG_BaseDir()))
+		Cvar_ForceSet("basedir", (char *)QG_BaseDir());
 
 	//
 	// cddir <path>

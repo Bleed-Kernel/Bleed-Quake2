@@ -8,5 +8,6 @@ void QG_CaptureMouse(void);
 void QG_ReleaseMouse(void);
 
 void QG_Mkdir(const char* path);
+const char *QG_BaseDir(void);
 
 #endif

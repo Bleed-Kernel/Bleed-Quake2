@@ -12,6 +12,7 @@
 #include <crime/crime.h>
 
 #include "quake2.h"
+#include "quakegeneric.h"
 #include "client/keys.h"
 #include "ref_soft/r_local.h"
 
@@ -479,6 +480,22 @@ void QG_ReleaseMouse(void) {
         cs_pointer_lock(g_window, 0);
 }
 
+#define BASEDIR_FALLBACK "/mnt/data/quake2"
+static char g_basedir[256];
+
+const char *QG_BaseDir(void) {
+    if (g_basedir[0])
+        return g_basedir;
+
+    char *slash;
+    if (_taskpath((uint64_t)_getpid(), g_basedir, sizeof(g_basedir)) == 0 &&
+        (slash = strrchr(g_basedir, '/')) != NULL && slash != g_basedir)
+        *slash = '\0';
+    else
+        strcpy(g_basedir, BASEDIR_FALLBACK);
+    return g_basedir;
+}
+
 int main(int argc, char **argv) {
     int i;
     int time;
@@ -505,13 +522,13 @@ int main(int argc, char **argv) {
             for (i = 0; i < argc; ++i)
                 argv_ext[i] = argv[i];
             argv_ext[argc] = "-basedir";
-            argv_ext[argc + 1] = "/initrd";
+            argv_ext[argc + 1] = (char *)QG_BaseDir();
             argv_ext[argc + 2] = NULL;
             argc += 2;
             argv = argv_ext;
         }
         else if (basedir_index > 0 && basedir_index < argc) {
-            argv[basedir_index] = "/initrd";
+            argv[basedir_index] = (char *)QG_BaseDir();
         }
     }
 
